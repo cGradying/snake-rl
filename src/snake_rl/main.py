@@ -1,4 +1,7 @@
+import json
 import sys
+import time
+from dataclasses import dataclass
 from pathlib import Path
 
 import pygame
@@ -7,12 +10,13 @@ from .core import SnakeGame
 from .direction import Direction
 from .env import ACTIONS, build_observation
 
-GRID_SIZE = 100
-CELL_SIZE = 6
-GRID_PIXELS = GRID_SIZE * CELL_SIZE
 PANEL_WIDTH = 240
-WINDOW_W = GRID_PIXELS + PANEL_WIDTH
-WINDOW_H = GRID_PIXELS
+MAX_PLAY_PX = 720  # play-area pixel budget; cell size derives from grid_size to fit this
+
+DEFAULT_GRID_SIZE = 100
+GRID_SIZE_MIN = 20
+GRID_SIZE_MAX = 150
+GRID_SIZE_STEP = 10
 
 # speed ramps with score: harder as you go, capped so it stays playable
 FPS_BASE = 12
@@ -20,6 +24,7 @@ FPS_MAX = 45
 FPS_PER_POINT = 0.6
 
 MODEL_PATH = Path(__file__).resolve().parents[2] / "models" / "ppo_snake.zip"
+FEEDBACK_PATH = Path(__file__).resolve().parents[2] / "feedback.jsonl"
 
 # astra moon palette
 BG_COLOR = (15, 23, 42)  # bg_bottom
@@ -33,11 +38,8 @@ TEXT_COLOR = (201, 209, 217)  # text
 DIM_TEXT_COLOR = (125, 141, 161)  # dim
 BAR_COLOR = (16, 185, 129)  # emerald
 BAR_ACTIVE_COLOR = (110, 231, 183)  # emerald_pale
-
-
-def current_fps(score: int) -> float:
-    return min(FPS_MAX, FPS_BASE + score * FPS_PER_POINT)
-
+REWARD_COLOR = (110, 231, 183)  # emerald_pale
+PUNISH_COLOR = (248, 113, 113)  # red_light
 
 KEY_TO_DIRECTION = {
     pygame.K_UP: Direction.UP,
@@ -50,7 +52,32 @@ KEY_TO_DIRECTION = {
     pygame.K_d: Direction.RIGHT,
 }
 
+REWARD_KEYS = {pygame.K_EQUALS, pygame.K_KP_PLUS}
+PUNISH_KEYS = {pygame.K_MINUS, pygame.K_KP_MINUS}
+
 ACTION_LABELS = ["UP", "DOWN", "LEFT", "RIGHT"]
+
+
+@dataclass
+class Layout:
+    grid_size: int
+    cell_size: int
+
+    @property
+    def grid_pixels(self) -> int:
+        return self.grid_size * self.cell_size
+
+    @property
+    def window_w(self) -> int:
+        return self.grid_pixels + PANEL_WIDTH
+
+    @property
+    def window_h(self) -> int:
+        return self.grid_pixels
+
+
+def compute_cell_size(grid_size: int) -> int:
+    return max(1, MAX_PLAY_PX // grid_size)
 
 
 class Agent:
@@ -82,26 +109,43 @@ class Agent:
         return int(action), probs.detach().cpu().numpy()
 
 
-def draw_cell(surface, x, y, color):
-    rect = (x * CELL_SIZE, y * CELL_SIZE, CELL_SIZE, CELL_SIZE)
+def log_feedback(obs, action: int, reward: float) -> None:
+    entry = {"obs": [float(v) for v in obs], "action": int(action), "reward": reward}
+    with open(FEEDBACK_PATH, "a") as f:
+        f.write(json.dumps(entry) + "\n")
+
+
+def current_fps(score: int) -> float:
+    return min(FPS_MAX, FPS_BASE + score * FPS_PER_POINT)
+
+
+def draw_cell(surface, x, y, cell_size, color):
+    rect = (x * cell_size, y * cell_size, cell_size, cell_size)
     pygame.draw.rect(surface, color, rect)
 
 
-def draw_panel(surface, font, small_font, ai_mode, agent, action_probs, chosen_action, game):
-    panel_rect = (GRID_PIXELS, 0, PANEL_WIDTH, WINDOW_H)
+def draw_panel(surface, font, small_font, layout, ai_mode, agent, action_probs, chosen_action, game, toast):
+    panel_rect = (layout.grid_pixels, 0, PANEL_WIDTH, layout.window_h)
     pygame.draw.rect(surface, PANEL_BG_COLOR, panel_rect)
 
-    x = GRID_PIXELS + 16
+    x = layout.grid_pixels + 16
     y = 16
     mode_text = "AI: ON" if ai_mode else "AI: OFF"
     surface.blit(font.render(mode_text, True, TEXT_COLOR), (x, y))
     y += 34
-    surface.blit(small_font.render("press M to toggle", True, DIM_TEXT_COLOR), (x, y))
+    surface.blit(small_font.render("M: toggle AI", True, DIM_TEXT_COLOR), (x, y))
+    y += 24
+    surface.blit(small_font.render("+/-: reward/punish AI's move", True, DIM_TEXT_COLOR), (x, y))
     y += 34
 
     speed_line = f"speed {current_fps(game.score):.0f} fps · {len(game.obstacles)} obstacles"
     surface.blit(small_font.render(speed_line, True, DIM_TEXT_COLOR), (x, y))
     y += 34
+
+    if toast:
+        text, color, _ = toast
+        surface.blit(small_font.render(text, True, color), (x, y))
+    y += 30
 
     if not ai_mode:
         surface.blit(small_font.render("manual control", True, DIM_TEXT_COLOR), (x, y))
@@ -145,20 +189,64 @@ def _wrap(text, width):
     return lines
 
 
+def settings_menu(clock, font, small_font) -> int:
+    """Pre-game screen: pick the grid size ('the box'). Returns grid_size."""
+    menu_w, menu_h = 480, 260
+    screen = pygame.display.set_mode((menu_w, menu_h))
+    pygame.display.set_caption("Snake RL — Setup")
+    grid_size = DEFAULT_GRID_SIZE
+
+    choosing = True
+    while choosing:
+        for event in pygame.event.get():
+            if event.type == pygame.QUIT:
+                pygame.quit()
+                sys.exit()
+            elif event.type == pygame.KEYDOWN:
+                if event.key in (pygame.K_LEFT, pygame.K_a):
+                    grid_size = max(GRID_SIZE_MIN, grid_size - GRID_SIZE_STEP)
+                elif event.key in (pygame.K_RIGHT, pygame.K_d):
+                    grid_size = min(GRID_SIZE_MAX, grid_size + GRID_SIZE_STEP)
+                elif event.key in (pygame.K_RETURN, pygame.K_KP_ENTER):
+                    choosing = False
+                elif event.key == pygame.K_ESCAPE:
+                    pygame.quit()
+                    sys.exit()
+
+        screen.fill(BG_COLOR)
+        title = font.render("Snake RL — Setup", True, TEXT_COLOR)
+        screen.blit(title, (menu_w // 2 - title.get_width() // 2, 40))
+        label = font.render(f"Grid size: {grid_size} x {grid_size}", True, HEAD_COLOR)
+        screen.blit(label, (menu_w // 2 - label.get_width() // 2, 110))
+        hint = small_font.render("Left/Right (or A/D) to adjust · Enter to start", True, DIM_TEXT_COLOR)
+        screen.blit(hint, (menu_w // 2 - hint.get_width() // 2, 160))
+        hint2 = small_font.render(f"range {GRID_SIZE_MIN}-{GRID_SIZE_MAX}, step {GRID_SIZE_STEP}", True, DIM_TEXT_COLOR)
+        screen.blit(hint2, (menu_w // 2 - hint2.get_width() // 2, 188))
+        pygame.display.flip()
+        clock.tick(30)
+
+    return grid_size
+
+
 def run() -> None:
     pygame.init()
-    screen = pygame.display.set_mode((WINDOW_W, WINDOW_H))
-    pygame.display.set_caption("Snake 100x100")
     clock = pygame.time.Clock()
     font = pygame.font.SysFont(None, 30)
     small_font = pygame.font.SysFont(None, 22)
 
-    game = SnakeGame(grid_size=GRID_SIZE)
+    grid_size = settings_menu(clock, font, small_font)
+    layout = Layout(grid_size=grid_size, cell_size=compute_cell_size(grid_size))
+    screen = pygame.display.set_mode((layout.window_w, layout.window_h))
+    pygame.display.set_caption(f"Snake RL — {grid_size}x{grid_size}")
+
+    game = SnakeGame(grid_size=grid_size)
     pending_direction = game.direction
     ai_mode = False
     agent = Agent(MODEL_PATH)
     action_probs = None
     chosen_action = None
+    last_obs = None
+    toast = None  # (text, color, expires_at)
 
     running = True
     while running:
@@ -177,30 +265,40 @@ def run() -> None:
                     pending_direction = game.direction
                 elif event.key == pygame.K_ESCAPE:
                     running = False
+                elif ai_mode and last_obs is not None and event.key in REWARD_KEYS:
+                    log_feedback(last_obs, chosen_action, 1.0)
+                    toast = ("+1 logged", REWARD_COLOR, time.time() + 1.5)
+                elif ai_mode and last_obs is not None and event.key in PUNISH_KEYS:
+                    log_feedback(last_obs, chosen_action, -1.0)
+                    toast = ("-1 logged", PUNISH_COLOR, time.time() + 1.5)
 
         if ai_mode and agent.model is not None and game.alive:
             obs = build_observation(game)
             chosen_action, action_probs = agent.predict(obs)
             pending_direction = ACTIONS[chosen_action]
+            last_obs = obs
 
         if game.alive:
             game.step(pending_direction)
 
+        if toast and time.time() > toast[2]:
+            toast = None
+
         screen.fill(BG_COLOR)
         for ox, oy in game.obstacles:
-            draw_cell(screen, ox, oy, OBSTACLE_COLOR)
+            draw_cell(screen, ox, oy, layout.cell_size, OBSTACLE_COLOR)
         for i, (x, y) in enumerate(game.snake):
-            draw_cell(screen, x, y, HEAD_COLOR if i == 0 else SNAKE_COLOR)
-        draw_cell(screen, *game.food, FOOD_COLOR)
+            draw_cell(screen, x, y, layout.cell_size, HEAD_COLOR if i == 0 else SNAKE_COLOR)
+        draw_cell(screen, *game.food, layout.cell_size, FOOD_COLOR)
 
         score_surf = font.render(f"Score: {game.score}", True, TEXT_COLOR)
         screen.blit(score_surf, (8, 8))
 
         if not game.alive:
             msg = font.render("Game Over — press R to restart", True, TEXT_COLOR)
-            screen.blit(msg, (GRID_PIXELS // 2 - msg.get_width() // 2, WINDOW_H // 2))
+            screen.blit(msg, (layout.grid_pixels // 2 - msg.get_width() // 2, layout.window_h // 2))
 
-        draw_panel(screen, font, small_font, ai_mode, agent, action_probs, chosen_action, game)
+        draw_panel(screen, font, small_font, layout, ai_mode, agent, action_probs, chosen_action, game, toast)
 
         pygame.display.flip()
         clock.tick(current_fps(game.score))

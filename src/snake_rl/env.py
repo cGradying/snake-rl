@@ -1,4 +1,6 @@
-from typing import Optional
+import json
+from pathlib import Path
+from typing import Optional, Union
 
 import numpy as np
 
@@ -97,3 +99,46 @@ if gym is not None:
             hx, hy = self.game.snake[0]
             fx, fy = self.game.food
             return abs(hx - fx) + abs(hy - fy)
+
+    class HumanFeedbackWrapper(gym.Wrapper):
+        """Applies logged human +1/-1 feedback (from main.py's in-game
+        reward/punish keys) as a reward bonus during training.
+
+        Observations are exact binary flag vectors (danger/food-dir/heading),
+        so an (obs, action) exact-match lookup is enough -- no fuzzy nearest-
+        neighbor matching needed.
+        """
+
+        def __init__(self, env, feedback_path: Union[str, Path], bonus_scale: float = 5.0):
+            super().__init__(env)
+            self.bonus_scale = bonus_scale
+            self.table = _load_feedback_table(feedback_path)
+            self._last_obs = None
+
+        def reset(self, **kwargs):
+            obs, info = self.env.reset(**kwargs)
+            self._last_obs = obs
+            return obs, info
+
+        def step(self, action):
+            key = (tuple(self._last_obs.tolist()), int(action))
+            bonus = self.table.get(key, 0.0) * self.bonus_scale
+            obs, reward, terminated, truncated, info = self.env.step(action)
+            self._last_obs = obs
+            return obs, reward + bonus, terminated, truncated, info
+
+
+def _load_feedback_table(feedback_path: Union[str, Path]) -> dict:
+    path = Path(feedback_path)
+    if not path.exists():
+        return {}
+    buckets: dict = {}
+    with open(path) as f:
+        for line in f:
+            line = line.strip()
+            if not line:
+                continue
+            entry = json.loads(line)
+            key = (tuple(entry["obs"]), int(entry["action"]))
+            buckets.setdefault(key, []).append(entry["reward"])
+    return {key: sum(vals) / len(vals) for key, vals in buckets.items()}
