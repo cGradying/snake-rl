@@ -24,12 +24,13 @@ def build_observation(game: SnakeGame) -> np.ndarray:
     """
     head_x, head_y = game.snake[0]
     occupied = set(game.snake) - {game.snake[-1]}  # tail vacates this tick, same as step()
+    hazards = occupied | game.obstacles
 
     def blocked(dx: int, dy: int) -> float:
         x, y = head_x + dx, head_y + dy
         if not (0 <= x < game.grid_size and 0 <= y < game.grid_size):
             return 1.0
-        return 1.0 if (x, y) in occupied else 0.0
+        return 1.0 if (x, y) in hazards else 0.0
 
     danger = [
         blocked(0, -1),  # up

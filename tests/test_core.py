@@ -60,6 +60,30 @@ def test_non_growing_move_does_not_falsely_collide():
         assert game.step(Direction.RIGHT)
 
 
+def test_obstacle_spawns_after_enough_score():
+    game = SnakeGame(grid_size=10, seed=1)
+    game.score = 4  # one below OBSTACLE_INTERVAL (5)
+    game.food = (game.snake[0][0] + 1, game.snake[0][1])
+    game.step(Direction.RIGHT)  # eats -> score becomes 5, crosses threshold
+    assert len(game.obstacles) == 1
+
+
+def test_obstacle_collision_ends_game():
+    game = SnakeGame(grid_size=10, seed=1)
+    game.obstacles = {(6, 5)}
+    game.direction = Direction.RIGHT
+    alive = game.step(Direction.RIGHT)
+    assert not alive and not game.alive
+
+
+def test_obstacles_disabled_never_spawn():
+    game = SnakeGame(grid_size=10, seed=1, obstacles_enabled=False)
+    game.score = 4
+    game.food = (game.snake[0][0] + 1, game.snake[0][1])
+    game.step(Direction.RIGHT)
+    assert len(game.obstacles) == 0
+
+
 if __name__ == "__main__":
     tests = [v for k, v in list(globals().items()) if k.startswith("test_")]
     for t in tests:

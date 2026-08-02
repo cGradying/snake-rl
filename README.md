@@ -15,6 +15,13 @@ PYTHONPATH=src .venv/bin/python -m snake_rl.main
 Controls: arrow keys / WASD to steer, `R` to restart after game over, `M` to
 toggle AI control, `Esc` to quit.
 
+## Challenge scaling
+
+Speed and hazards both ramp with score, no separate difficulty setting:
+
+- **Speed**: tick rate climbs from 12 FPS toward a 45 FPS cap as score rises (`current_fps()` in `main.py`).
+- **Obstacles**: a new static obstacle cell appears on the board every 5 points (`OBSTACLE_INTERVAL` in `core.py`), placed clear of the snake and food. Hitting one ends the game, same as a wall.
+
 ## AI mode
 
 Press `M` in-game to hand control to the trained policy. A right-side panel
@@ -46,8 +53,9 @@ crashing — manual play never requires the ML deps at all.
 ## How the observation works
 
 The policy doesn't see the raw 100x100 grid — it sees 12 numbers relative to
-the snake's head: 4 danger flags (wall/self immediately up/down/left/right),
-4 food-direction flags, 4 one-hot current-heading flags. This keeps training
+the snake's head: 4 danger flags (wall/self/obstacle immediately
+up/down/left/right), 4 food-direction flags, 4 one-hot current-heading
+flags. This keeps training
 difficulty independent of grid size, at the cost of the agent having no
 long-range awareness of its own body — it can still trap itself. Reward is
 +10 food / -10 death / -0.01 per step / ±0.1 for moving toward vs. away from
@@ -59,3 +67,11 @@ this scale).
 longer training, and likely a richer observation (e.g. lookahead further
 than one cell) to get past the self-trapping failure mode as the snake gets
 long.
+
+---
+
+<div align="center">
+
+[![Author: cGradying](https://img.shields.io/badge/cGradying-AUTHOR-10B981?style=for-the-badge&labelColor=0B1120)](https://github.com/cGradying)
+
+</div>

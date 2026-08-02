@@ -13,19 +13,31 @@ GRID_PIXELS = GRID_SIZE * CELL_SIZE
 PANEL_WIDTH = 240
 WINDOW_W = GRID_PIXELS + PANEL_WIDTH
 WINDOW_H = GRID_PIXELS
-FPS = 15
+
+# speed ramps with score: harder as you go, capped so it stays playable
+FPS_BASE = 12
+FPS_MAX = 45
+FPS_PER_POINT = 0.6
 
 MODEL_PATH = Path(__file__).resolve().parents[2] / "models" / "ppo_snake.zip"
 
-BG_COLOR = (17, 17, 17)
-PANEL_BG_COLOR = (28, 28, 32)
-SNAKE_COLOR = (80, 220, 120)
-HEAD_COLOR = (140, 240, 170)
-FOOD_COLOR = (220, 80, 80)
-TEXT_COLOR = (230, 230, 230)
-DIM_TEXT_COLOR = (150, 150, 155)
-BAR_COLOR = (90, 140, 220)
-BAR_ACTIVE_COLOR = (140, 240, 170)
+# astra moon palette
+BG_COLOR = (15, 23, 42)  # bg_bottom
+PANEL_BG_COLOR = (17, 26, 46)  # panel
+BORDER_COLOR = (30, 41, 59)  # border
+SNAKE_COLOR = (16, 185, 129)  # emerald
+HEAD_COLOR = (52, 211, 153)  # emerald_light
+FOOD_COLOR = (239, 68, 68)  # red
+OBSTACLE_COLOR = (125, 141, 161)  # dim
+TEXT_COLOR = (201, 209, 217)  # text
+DIM_TEXT_COLOR = (125, 141, 161)  # dim
+BAR_COLOR = (16, 185, 129)  # emerald
+BAR_ACTIVE_COLOR = (110, 231, 183)  # emerald_pale
+
+
+def current_fps(score: int) -> float:
+    return min(FPS_MAX, FPS_BASE + score * FPS_PER_POINT)
+
 
 KEY_TO_DIRECTION = {
     pygame.K_UP: Direction.UP,
@@ -75,7 +87,7 @@ def draw_cell(surface, x, y, color):
     pygame.draw.rect(surface, color, rect)
 
 
-def draw_panel(surface, font, small_font, ai_mode, agent, action_probs, chosen_action):
+def draw_panel(surface, font, small_font, ai_mode, agent, action_probs, chosen_action, game):
     panel_rect = (GRID_PIXELS, 0, PANEL_WIDTH, WINDOW_H)
     pygame.draw.rect(surface, PANEL_BG_COLOR, panel_rect)
 
@@ -85,7 +97,11 @@ def draw_panel(surface, font, small_font, ai_mode, agent, action_probs, chosen_a
     surface.blit(font.render(mode_text, True, TEXT_COLOR), (x, y))
     y += 34
     surface.blit(small_font.render("press M to toggle", True, DIM_TEXT_COLOR), (x, y))
-    y += 40
+    y += 34
+
+    speed_line = f"speed {current_fps(game.score):.0f} fps · {len(game.obstacles)} obstacles"
+    surface.blit(small_font.render(speed_line, True, DIM_TEXT_COLOR), (x, y))
+    y += 34
 
     if not ai_mode:
         surface.blit(small_font.render("manual control", True, DIM_TEXT_COLOR), (x, y))
@@ -107,7 +123,7 @@ def draw_panel(surface, font, small_font, ai_mode, agent, action_probs, chosen_a
 
         surface.blit(small_font.render(label, True, TEXT_COLOR), (x, y))
         bar_y = y + 22
-        pygame.draw.rect(surface, (50, 50, 55), (x, bar_y, bar_max_w, 14))
+        pygame.draw.rect(surface, BORDER_COLOR, (x, bar_y, bar_max_w, 14))
         pygame.draw.rect(surface, color, (x, bar_y, int(bar_max_w * prob), 14))
         pct = small_font.render(f"{prob * 100:.0f}%", True, DIM_TEXT_COLOR)
         surface.blit(pct, (x + bar_max_w - pct.get_width(), y))
@@ -171,6 +187,8 @@ def run() -> None:
             game.step(pending_direction)
 
         screen.fill(BG_COLOR)
+        for ox, oy in game.obstacles:
+            draw_cell(screen, ox, oy, OBSTACLE_COLOR)
         for i, (x, y) in enumerate(game.snake):
             draw_cell(screen, x, y, HEAD_COLOR if i == 0 else SNAKE_COLOR)
         draw_cell(screen, *game.food, FOOD_COLOR)
@@ -182,10 +200,10 @@ def run() -> None:
             msg = font.render("Game Over — press R to restart", True, TEXT_COLOR)
             screen.blit(msg, (GRID_PIXELS // 2 - msg.get_width() // 2, WINDOW_H // 2))
 
-        draw_panel(screen, font, small_font, ai_mode, agent, action_probs, chosen_action)
+        draw_panel(screen, font, small_font, ai_mode, agent, action_probs, chosen_action, game)
 
         pygame.display.flip()
-        clock.tick(FPS)
+        clock.tick(current_fps(game.score))
 
     pygame.quit()
     sys.exit()
