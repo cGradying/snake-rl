@@ -135,7 +135,9 @@ def draw_panel(surface, font, small_font, layout, ai_mode, agent, action_probs, 
     y += 34
     surface.blit(small_font.render("M: toggle AI", True, DIM_TEXT_COLOR), (x, y))
     y += 24
-    surface.blit(small_font.render("+/-: reward/punish AI's move", True, DIM_TEXT_COLOR), (x, y))
+    surface.blit(small_font.render("+/-: reward/punish its last move", True, DIM_TEXT_COLOR), (x, y))
+    y += 24
+    surface.blit(small_font.render("auto: +1 on food, -1 on death", True, DIM_TEXT_COLOR), (x, y))
     y += 34
 
     speed_line = f"speed {current_fps(game.score):.0f} fps · {len(game.obstacles)} obstacles"
@@ -278,8 +280,19 @@ def run() -> None:
             pending_direction = ACTIONS[chosen_action]
             last_obs = obs
 
+        prev_score = game.score
+        prev_alive = game.alive
+
         if game.alive:
             game.step(pending_direction)
+
+        if ai_mode and agent.model is not None and last_obs is not None:
+            if game.score > prev_score:
+                log_feedback(last_obs, chosen_action, 1.0)
+                toast = ("auto +1 · ate food", REWARD_COLOR, time.time() + 1.2)
+            elif prev_alive and not game.alive:
+                log_feedback(last_obs, chosen_action, -1.0)
+                toast = ("auto -1 · died", PUNISH_COLOR, time.time() + 1.8)
 
         if toast and time.time() > toast[2]:
             toast = None

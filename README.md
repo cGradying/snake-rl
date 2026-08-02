@@ -56,11 +56,12 @@ PYTHONPATH=src .venv/bin/python -m snake_rl.train --timesteps 300000
 
 Pass `--reset` to throw away the current model and start fresh instead.
 
-## Reward / punish the AI yourself
+## Reward / punish the AI
 
-While AI mode is on, press `+` to reward or `-` to punish the move the AI
-just made. Each press appends `{obs, action, reward}` to `feedback.jsonl` at
-the repo root — a toast on the panel confirms it logged.
+Two sources feed the same `feedback.jsonl`, both shown as a toast on the panel:
+
+- **Manual**: while AI mode is on, press `+` to reward or `-` to punish the move the AI just made.
+- **Automatic**: every food eaten logs +1, every death logs -1, no keypress needed — the same `{obs, action, reward}` entries the manual keys produce.
 
 To fold that feedback into the next training run:
 
