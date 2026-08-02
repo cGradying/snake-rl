@@ -14,7 +14,9 @@ class SnakeGame:
         self._rng = random.Random(seed)
         self.reset()
 
-    def reset(self) -> None:
+    def reset(self, seed: Optional[int] = None) -> None:
+        if seed is not None:
+            self._rng = random.Random(seed)
         mid = self.grid_size // 2
         self.snake = deque([(mid, mid), (mid - 1, mid), (mid - 2, mid)])
         self.direction = Direction.RIGHT
