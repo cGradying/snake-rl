@@ -90,7 +90,7 @@ class Agent:
         self.error = None
 
     def load(self) -> None:
-        if self.model is not None or self.error is not None:
+        if self.model is not None:
             return
         try:
             from stable_baselines3 import PPO
@@ -101,6 +101,7 @@ class Agent:
             self.error = "no trained model — run: python -m snake_rl.train"
             return
         self.model = PPO.load(self.model_path)
+        self.error = None
 
     def predict(self, obs):
         action, _ = self.model.predict(obs, deterministic=True)
@@ -109,8 +110,8 @@ class Agent:
         return int(action), probs.detach().cpu().numpy()
 
 
-def log_feedback(obs, action: int, reward: float) -> None:
-    entry = {"obs": [float(v) for v in obs], "action": int(action), "reward": reward}
+def log_feedback(obs, action: int, reward: float, source: str) -> None:
+    entry = {"obs": [float(v) for v in obs], "action": int(action), "reward": reward, "source": source}
     with open(FEEDBACK_PATH, "a") as f:
         f.write(json.dumps(entry) + "\n")
 
@@ -268,10 +269,10 @@ def run() -> None:
                 elif event.key == pygame.K_ESCAPE:
                     running = False
                 elif ai_mode and last_obs is not None and event.key in REWARD_KEYS:
-                    log_feedback(last_obs, chosen_action, 1.0)
+                    log_feedback(last_obs, chosen_action, 1.0, source="manual")
                     toast = ("+1 logged", REWARD_COLOR, time.time() + 1.5)
                 elif ai_mode and last_obs is not None and event.key in PUNISH_KEYS:
-                    log_feedback(last_obs, chosen_action, -1.0)
+                    log_feedback(last_obs, chosen_action, -1.0, source="manual")
                     toast = ("-1 logged", PUNISH_COLOR, time.time() + 1.5)
 
         if ai_mode and agent.model is not None and game.alive:
@@ -288,10 +289,10 @@ def run() -> None:
 
         if ai_mode and agent.model is not None and last_obs is not None:
             if game.score > prev_score:
-                log_feedback(last_obs, chosen_action, 1.0)
+                log_feedback(last_obs, chosen_action, 1.0, source="auto")
                 toast = ("auto +1 · ate food", REWARD_COLOR, time.time() + 1.2)
             elif prev_alive and not game.alive:
-                log_feedback(last_obs, chosen_action, -1.0)
+                log_feedback(last_obs, chosen_action, -1.0, source="auto")
                 toast = ("auto -1 · died", PUNISH_COLOR, time.time() + 1.8)
 
         if toast and time.time() > toast[2]:

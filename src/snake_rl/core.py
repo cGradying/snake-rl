@@ -30,13 +30,22 @@ class SnakeGame:
         self._place_food()
 
     def _random_free_cell(self, exclude: Set[Tuple[int, int]]) -> Tuple[int, int]:
-        while True:
+        # rejection sampling degrades as the grid fills up; cap attempts and
+        # fall back to an exhaustive scan rather than spinning indefinitely
+        for _ in range(1000):
             cell = (
                 self._rng.randrange(self.grid_size),
                 self._rng.randrange(self.grid_size),
             )
             if cell not in exclude:
                 return cell
+
+        for x in range(self.grid_size):
+            for y in range(self.grid_size):
+                if (x, y) not in exclude:
+                    return (x, y)
+
+        raise RuntimeError("no free cell left on the grid")
 
     def _place_food(self) -> None:
         self.food = self._random_free_cell(set(self.snake) | self.obstacles)

@@ -11,3 +11,6 @@ venv/
 
 # macOS
 .DS_Store
+
+# training checkpoints (intermediate; only the final models/ppo_snake.zip is committed)
+models/checkpoints/

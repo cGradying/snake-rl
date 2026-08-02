@@ -129,6 +129,13 @@ if gym is not None:
 
 
 def _load_feedback_table(feedback_path: Union[str, Path]) -> dict:
+    """Manual feedback wins over auto on a colliding (obs, action) key: the
+    observation is a coarse 12-bit binary vector, so unrelated situations
+    collide on the same key often, and a deliberate human judgment call
+    shouldn't get averaged away by the blunt auto food/death signal.
+    Entries with no "source" predate the auto-feedback feature and were all
+    logged by hand, so they default to manual.
+    """
     path = Path(feedback_path)
     if not path.exists():
         return {}
@@ -140,5 +147,10 @@ def _load_feedback_table(feedback_path: Union[str, Path]) -> dict:
                 continue
             entry = json.loads(line)
             key = (tuple(entry["obs"]), int(entry["action"]))
-            buckets.setdefault(key, []).append(entry["reward"])
-    return {key: sum(vals) / len(vals) for key, vals in buckets.items()}
+            source = entry.get("source", "manual")
+            buckets.setdefault(key, {"manual": [], "auto": []})[source].append(entry["reward"])
+    table = {}
+    for key, sources in buckets.items():
+        vals = sources["manual"] or sources["auto"]
+        table[key] = sum(vals) / len(vals)
+    return table
